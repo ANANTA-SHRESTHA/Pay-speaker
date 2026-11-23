@@ -1,0 +1,97 @@
+<resources>
+    <string name="app_name">PaySpeaker</string>
+    <string name="notification_listener_label">PaySpeaker Payment Listener</string>
+
+    <!-- Navigation -->
+    <string name="nav_soundbox">Soundbox</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Voice &amp; Apps</string>
+
+    <!-- Soundbox Screen -->
+    <string name="soundbox_title">PaySpeaker</string>
+    <string name="soundbox_subtitle">Merchant Payment Soundbox</string>
+    <string name="soundbox_active_badge">LISTENING</string>
+    <string name="soundbox_paused_badge">MUTED</string>
+    <string name="soundbox_speaking_badge">SPEAKING</string>
+    <string name="soundbox_standby_badge">STANDBY</string>
+    <string name="soundbox_today_total">Today\'s Collection</string>
+    <string name="soundbox_tx_count">%1$d payments</string>
+    <string name="soundbox_last_payment">Last Received</string>
+    <string name="soundbox_no_payments_yet">Waiting for payment</string>
+    <string name="soundbox_quick_test_title">Quick Soundbox Test</string>
+    <string name="soundbox_quick_test_subtitle">Hear how incoming payments are announced</string>
+    <string name="soundbox_custom_simulate">Custom Test</string>
+    <string name="soundbox_recent_alerts">Recent Alerts</string>
+    <string name="soundbox_view_all">View All</string>
+
+    <!-- Permissions -->
+    <string name="perm_listener_title">Notification Access Required</string>
+    <string name="perm_listener_desc">Allow PaySpeaker to read incoming eSewa, Khalti, Fonepay, and bank notifications so it can announce payments automatically.</string>
+    <string name="perm_listener_cta">Enable Access</string>
+    <string name="perm_notif_title">Allow Status Notifications</string>
+    <string name="perm_notif_desc">Required on Android 13+ to keep the Soundbox monitor visible and reliable in the background.</string>
+    <string name="perm_notif_cta">Allow</string>
+
+    <!-- History Screen -->
+    <string name="history_title">Payment Ledger</string>
+    <string name="history_search_hint">Search sender, app, or amount…</string>
+    <string name="history_all_time_total">Filtered Total</string>
+    <string name="history_clear_all">Clear All</string>
+    <string name="history_empty_title">No Payment Alerts Yet</string>
+    <string name="history_empty_desc">Incoming eSewa, Khalti, Fonepay, and bank transfer alerts will appear here automatically. Try a quick test on the Soundbox tab!</string>
+    <string name="history_no_matches_title">No Matching Transactions</string>
+    <string name="history_no_matches_desc">Try adjusting your search query, date range, or payment channel filter.</string>
+    <string name="history_reset_filters">Reset Filters</string>
+    <string name="history_sort_label">Sort</string>
+    <string name="history_unknown_sender">Direct Transfer</string>
+    <string name="history_replay_cd">Replay voice announcement</string>
+    <string name="history_delete_cd">Delete payment record</string>
+    <string name="history_simulated_tag">TEST</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Voice &amp; Channels</string>
+    <string name="settings_voice_section">Voice &amp; Text-to-Speech Engine</string>
+    <string name="settings_merchant_name_label">Merchant / Shop Name</string>
+    <string name="settings_merchant_name_hint">e.g. Himalayan Cafe (announced aloud)</string>
+    <string name="settings_language_label">Announcement Language</string>
+    <string name="settings_speech_rate">Speech Speed</string>
+    <string name="settings_speech_pitch">Voice Pitch</string>
+    <string name="settings_tts_voice_label">Custom TTS Voice</string>
+    <string name="settings_tts_voice_default">System Default Voice</string>
+    <string name="settings_own_voice_section">Own Voice &amp; Custom Audio</string>
+    <string name="settings_own_voice_desc">Record your own shop greeting or import an audio clip to play when payments arrive.</string>
+    <string name="settings_record_start">Record Own Voice</string>
+    <string name="settings_record_stop">Stop Recording</string>
+    <string name="settings_import_audio">Import Audio</string>
+    <string name="settings_preview_own_voice">Play Clip</string>
+    <string name="settings_delete_own_voice">Delete own voice clip</string>
+    <string name="settings_mic_denied">Microphone permission is needed to record your own voice.</string>
+    <string name="soundbox_stop_speaking">Stop</string>
+    <string name="settings_chime_title">Play Soundbox Chime</string>
+    <string name="settings_chime_desc">Play a crisp merchant ding-dong tone before speaking</string>
+    <string name="settings_boost_title">Speaker Volume Boost</string>
+    <string name="settings_boost_desc">Raise media volume during payment announcements</string>
+    <string name="settings_sender_title">Announce Sender Name</string>
+    <string name="settings_sender_desc">Speak who sent the payment when detected</string>
+    <string name="settings_source_title">Announce Payment App</string>
+    <string name="settings_source_desc">Mention eSewa, Khalti, Fonepay, or Bank</string>
+    <string name="settings_repeat_title">Repeat Twice</string>
+    <string name="settings_repeat_desc">Useful for noisy shops and busy counters</string>
+    <string name="settings_test_voice">Test Current Voice</string>
+    <string name="settings_channels_section">Monitored Payment Channels</string>
+    <string name="settings_channels_hint">Choose which wallet and banking notifications trigger voice alerts.</string>
+    <string name="settings_service_section">Background Soundbox Guard</string>
+    <string name="settings_foreground_title">Persistent Soundbox Notification</string>
+    <string name="settings_foreground_desc">Keep an active Soundbox status bar notification for quick mute and testing</string>
+
+    <!-- Foreground Service -->
+    <string name="fg_channel_name">PaySpeaker Soundbox</string>
+    <string name="fg_channel_desc">Keeps payment voice announcements active at your counter</string>
+    <string name="fg_notif_title">PaySpeaker Soundbox Active</string>
+    <string name="fg_notif_text">Listening for eSewa, Khalti, Fonepay &amp; bank payments</string>
+    <string name="fg_notif_muted_title">PaySpeaker Soundbox Muted</string>
+    <string name="fg_notif_muted_text">Tap Resume to re-enable voice announcements</string>
+    <string name="fg_action_test">Test Sound</string>
+    <string name="fg_action_mute">Mute</string>
+    <string name="fg_action_resume">Resume</string>
+</resources>

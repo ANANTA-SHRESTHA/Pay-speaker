@@ -1,0 +1,6 @@
+{
+  "name": "PaySpeaker",
+  "description": "Smart merchant payment soundbox that announces incoming eSewa, Khalti, Fonepay, and bank transfer notifications aloud in real time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
