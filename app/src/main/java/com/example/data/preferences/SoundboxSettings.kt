@@ -22,7 +22,7 @@ enum class PaymentChannel(
         displayName = "Fonepay",
         shortCode = "Fonepay",
         packageHints = listOf("com.f1soft.fonepay", "com.fonepay"),
-        keywordHints = listOf("fonepay", "fone pay", "qr payment"),
+        keywordHints = listOf("fonepay", "fone pay", "fonepayqr", "qr payment"),
     ),
     IME_PAY(
         displayName = "IME Pay",
@@ -59,6 +59,13 @@ enum class PaymentChannel(
             "himalayan",
             "prabhu",
             "laxmi",
+            "laxmi sunrise",
+            "lxblnpka",
+            "citizens",
+            "ctznnpk",
+            "kumari",
+            "everest",
+            "nmb",
             "machhapuchchhre",
             "rastriya banijya",
         ),
@@ -94,6 +101,17 @@ enum class VoiceSourceMode(val label: String, val description: String) {
     OWN_VOICE_ONLY("My Voice Only", "Plays only your custom recorded voice alert"),
 }
 
+enum class AnnouncementReadMode(val label: String, val description: String) {
+    PAYMENT_ONLY(
+        label = "Payment Only",
+        description = "Reads only the received payment amount",
+    ),
+    PAYMENT_AND_SENDER(
+        label = "Payment & Sender",
+        description = "Reads the payment amount plus sender name or number",
+    ),
+}
+
 data class SoundboxSettings(
     val isSpeakerEnabled: Boolean = true,
     val merchantName: String = "",
@@ -101,13 +119,23 @@ data class SoundboxSettings(
     val selectedVoiceName: String? = null,
     val voiceSourceMode: VoiceSourceMode = VoiceSourceMode.TTS_VOICE,
     val ownVoiceFilePath: String? = null,
-    val speechRate: Float = 1.0f,
-    val speechPitch: Float = 1.0f,
+    val speechRate: Float = 0.96f,
+    val speechPitch: Float = 1.04f,
     val boostVolume: Boolean = true,
     val playChime: Boolean = true,
     val announceSender: Boolean = true,
-    val announceSource: Boolean = true,
+    val announceSource: Boolean = false,
     val repeatTwice: Boolean = false,
     val foregroundGuardEnabled: Boolean = false,
+    val dailySummaryEnabled: Boolean = true,
+    val dailySummaryHour: Int = 21,
+    val dailySummaryMinute: Int = 0,
     val enabledChannels: Set<PaymentChannel> = PaymentChannel.entries.toSet(),
-)
+) {
+    val readMode: AnnouncementReadMode
+        get() = if (announceSender) {
+            AnnouncementReadMode.PAYMENT_AND_SENDER
+        } else {
+            AnnouncementReadMode.PAYMENT_ONLY
+        }
+}

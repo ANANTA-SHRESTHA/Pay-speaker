@@ -53,7 +53,8 @@ fun PaymentAlertRow(
     onDeleteClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember(alert.id) { mutableStateOf(false) }
+    val itemKey = alert.cloudId.ifBlank { alert.id.toString() }
+    var expanded by remember(itemKey) { mutableStateOf(false) }
     val channel = remember(alert.channelName) {
         PaymentChannel.entries.find { it.name == alert.channelName } ?: PaymentChannel.OTHER_WALLET
     }
@@ -72,7 +73,7 @@ fun PaymentAlertRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .clickable { expanded = !expanded }
-            .testTag("payment_alert_card_${alert.id}"),
+            .testTag("payment_alert_card_$itemKey"),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface,

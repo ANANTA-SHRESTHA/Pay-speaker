@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
 class PaymentNotificationListenerService : NotificationListenerService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val recentFingerprints = LinkedHashMap<String, Long>()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -47,18 +46,45 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             text = fullBody,
         ) ?: return
 
-        if (isDuplicate("$pkg|${parsed.amount}|${parsed.senderName.orEmpty()}")) {
+        val container = (application as? PaySpeakerApp)?.container ?: return
+        if (!container.stateHolder.tryMarkRecentPayment(parsed.amount, parsed.senderName)) {
             return
         }
 
-        val container = (application as? PaySpeakerApp)?.container ?: return
+        val hasCachedSettings = container.preferencesRepository.hasLoadedFromDisk
+        val cachedSettings = container.preferencesRepository.latestSettings
+        var spokenImmediately: String? = null
+
+        if (hasCachedSettings) {
+            if (parsed.channel !in cachedSettings.enabledChannels) {
+                return
+            }
+            spokenImmediately = if (cachedSettings.isSpeakerEnabled) {
+                container.speakerEngine.announcePayment(
+                    amount = parsed.amount,
+                    currency = parsed.currency,
+                    senderName = parsed.senderName,
+                    sourceLabel = parsed.sourceLabel,
+                    settings = cachedSettings,
+                )
+            } else {
+                SpeechFormatter.formatAnnouncement(
+                    amount = parsed.amount,
+                    currency = parsed.currency,
+                    senderName = parsed.senderName,
+                    sourceLabel = parsed.sourceLabel,
+                    settings = cachedSettings,
+                )
+            }
+        }
+
         serviceScope.launch {
-            val settings = container.preferencesRepository.settingsFlow.first()
-            if (parsed.channel !in settings.enabledChannels) {
+            val settings = if (hasCachedSettings) cachedSettings else container.preferencesRepository.settingsFlow.first()
+            if (!hasCachedSettings && parsed.channel !in settings.enabledChannels) {
                 return@launch
             }
 
-            val spokenText = if (settings.isSpeakerEnabled) {
+            val spokenText = spokenImmediately ?: if (settings.isSpeakerEnabled) {
                 container.speakerEngine.announcePayment(
                     amount = parsed.amount,
                     currency = parsed.currency,
@@ -76,49 +102,27 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                 )
             }
 
-            container.paymentRepository.recordAlert(
-                PaymentAlertEntity(
-                    amount = parsed.amount,
-                    currency = parsed.currency,
-                    formattedAmount = parsed.formattedAmount,
-                    senderName = parsed.senderName,
-                    channelName = parsed.channel.name,
-                    sourceLabel = parsed.sourceLabel,
-                    packageName = parsed.packageName,
-                    rawTitle = parsed.rawTitle,
-                    rawMessage = parsed.rawText,
-                    spokenText = spokenText,
-                    wasSpoken = settings.isSpeakerEnabled,
-                    isSimulated = false,
-                )
+            val entity = PaymentAlertEntity(
+                amount = parsed.amount,
+                currency = parsed.currency,
+                formattedAmount = parsed.formattedAmount,
+                senderName = parsed.senderName,
+                channelName = parsed.channel.name,
+                sourceLabel = parsed.sourceLabel,
+                packageName = parsed.packageName,
+                rawTitle = parsed.rawTitle,
+                rawMessage = parsed.rawText,
+                spokenText = spokenText,
+                wasSpoken = settings.isSpeakerEnabled,
+                isSimulated = false,
             )
+            container.paymentRepository.recordAlert(entity)
+            container.firestorePaymentRepository.addAlertIfSignedIn(entity)
         }
-    }
-
-    @Synchronized
-    private fun isDuplicate(fingerprint: String): Boolean {
-        val now = System.currentTimeMillis()
-        val iterator = recentFingerprints.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (now - entry.value > DEDUP_WINDOW_MS) {
-                iterator.remove()
-            }
-        }
-        val previous = recentFingerprints[fingerprint]
-        if (previous != null && now - previous <= DEDUP_WINDOW_MS) {
-            return true
-        }
-        recentFingerprints[fingerprint] = now
-        return false
     }
 
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
-    }
-
-    companion object {
-        private const val DEDUP_WINDOW_MS = 6_000L
     }
 }

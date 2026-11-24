@@ -18,24 +18,32 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MonetizationOn
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.Summarize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -49,7 +57,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,13 +72,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.preferences.AnnouncementReadMode
 import com.example.data.preferences.PaymentChannel
 import com.example.data.preferences.VoiceLanguage
 import com.example.data.preferences.VoiceSourceMode
+import com.example.domain.DailySummaryCalculator
+import com.example.domain.SpeechFormatter
 import com.example.ui.theme.channelAccentColor
 import com.example.ui.viewmodel.PaySpeakerUiState
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     uiState: PaySpeakerUiState,
@@ -93,11 +107,19 @@ fun SettingsScreen(
     onImportCustomAudio: () -> Unit,
     onPreviewOwnVoice: () -> Unit,
     onDeleteOwnVoice: () -> Unit,
+    onSelectReadMode: (AnnouncementReadMode) -> Unit = {},
+    onDailySummaryEnabledChange: (Boolean) -> Unit = {},
+    onDailySummaryTimeChange: (Int, Int) -> Unit = { _, _ -> },
+    onSendDailySummaryNow: () -> Unit = {},
+    onRequestPostNotifications: () -> Unit = {},
+    onRetryBannerAd: () -> Unit = {},
+    onSignOut: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val settings = uiState.settings
     val selectedLangAvailable = settings.language in uiState.availableLanguages
     var showVoicePicker by remember { mutableStateOf(false) }
+    var showDailyTimePicker by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -115,6 +137,104 @@ fun SettingsScreen(
                     text = stringResource(R.string.settings_title),
                     style = MaterialTheme.typography.headlineMedium,
                 )
+            }
+
+            // Cloud Account & Sync Card
+            item {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AccountCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_account_section),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CloudDone,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_cloud_synced),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = uiState.userDisplayName?.takeIf { it.isNotBlank() } ?: "Google Merchant",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                uiState.userEmail?.takeIf { it.isNotBlank() }?.let { email ->
+                                    Text(
+                                        text = email,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onSignOut,
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("sign_out_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.Logout,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .padding(end = 6.dp)
+                                        .size(18.dp),
+                                )
+                                Text(stringResource(R.string.settings_sign_out))
+                            }
+                        }
+                    }
+                }
             }
 
             // Voice & Text-to-Speech Engine Section
@@ -329,6 +449,13 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             AssistChip(
+                                onClick = { onApplyVoicePreset(0.96f, 1.04f) },
+                                label = { Text("eSpeaker Natural") },
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("preset_espeaker_natural"),
+                            )
+                            AssistChip(
                                 onClick = { onApplyVoicePreset(1.0f, 1.0f) },
                                 label = { Text("Clear Standard") },
                                 modifier = Modifier
@@ -401,6 +528,35 @@ fun SettingsScreen(
                         }
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = stringResource(R.string.settings_read_mode_label),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                AnnouncementReadMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        selected = settings.readMode == mode,
+                                        onClick = { onSelectReadMode(mode) },
+                                        label = { Text(mode.label) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 48.dp)
+                                            .testTag("settings_read_mode_${mode.name.lowercase()}"),
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Preview: \"${SpeechFormatter.sampleAnnouncement(settings)}\"",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
 
                         SettingToggleRow(
                             title = stringResource(R.string.settings_chime_title),
@@ -663,6 +819,267 @@ fun SettingsScreen(
                 }
             }
 
+            // Daily Scheduled Balance Summary Notification
+            item {
+                val formattedScheduleTime = DailySummaryCalculator.formatScheduleTime(
+                    settings.dailySummaryHour,
+                    settings.dailySummaryMinute,
+                )
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Summarize,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_daily_summary_section),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+
+                        SettingToggleRow(
+                            title = stringResource(R.string.settings_daily_summary_title),
+                            description = stringResource(R.string.settings_daily_summary_desc),
+                            checked = settings.dailySummaryEnabled,
+                            onCheckedChange = onDailySummaryEnabledChange,
+                            tag = "toggle_daily_summary",
+                        )
+
+                        if (!uiState.permissions.postNotificationsGranted) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.settings_daily_summary_perm_hint),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(
+                                        onClick = onRequestPostNotifications,
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                    ) {
+                                        Text(stringResource(R.string.perm_notif_cta))
+                                    }
+                                }
+                            }
+                        }
+
+                        if (settings.dailySummaryEnabled) {
+                            OutlinedButton(
+                                onClick = { showDailyTimePicker = true },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("daily_summary_time_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Schedule,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .size(18.dp),
+                                )
+                                Text(
+                                    text = "${stringResource(R.string.settings_daily_summary_time)}: $formattedScheduleTime",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    text = "Change",
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                listOf(
+                                    20 to 0,
+                                    21 to 0,
+                                    22 to 0,
+                                ).forEach { (h, m) ->
+                                    val selected = settings.dailySummaryHour == h && settings.dailySummaryMinute == m
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { onDailySummaryTimeChange(h, m) },
+                                        label = { Text(DailySummaryCalculator.formatScheduleTime(h, m)) },
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("daily_summary_preset_${h}"),
+                                    )
+                                }
+                            }
+                        }
+
+                        FilledTonalButton(
+                            onClick = {
+                                if (!uiState.permissions.postNotificationsGranted) {
+                                    onRequestPostNotifications()
+                                } else {
+                                    onSendDailySummaryNow()
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("send_daily_summary_now_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.NotificationsActive,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .size(18.dp),
+                            )
+                            Text(stringResource(R.string.settings_daily_summary_send_now))
+                        }
+
+                        uiState.dailySummaryFeedback?.let { msg ->
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Google AdMob Monetization Status (Read-Only)
+            item {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admob_status_card"),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MonetizationOn,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_ads_section),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (uiState.adSdkInitialized) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        if (uiState.adSdkInitialized) {
+                                            R.string.settings_ads_sdk_ready
+                                        } else {
+                                            R.string.settings_ads_sdk_loading
+                                        }
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (uiState.adSdkInitialized) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = stringResource(R.string.settings_ads_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        if (uiState.isUsingTestAdUnits) {
+                                            R.string.settings_ads_mode_test
+                                        } else {
+                                            R.string.settings_ads_mode_live
+                                        }
+                                    ),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = uiState.bannerAdStatus,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("admob_banner_status_text"),
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = onRetryBannerAd,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("admob_reload_banner_button"),
+                        ) {
+                            Text(stringResource(R.string.settings_ads_reload))
+                        }
+                    }
+                }
+            }
+
             // Monitored Payment Channels
             item {
                 Surface(
@@ -732,6 +1149,38 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showDailyTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = settings.dailySummaryHour,
+            initialMinute = settings.dailySummaryMinute,
+            is24Hour = false,
+        )
+        AlertDialog(
+            onDismissRequest = { showDailyTimePicker = false },
+            title = { Text(stringResource(R.string.settings_daily_summary_time)) },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDailySummaryTimeChange(timePickerState.hour, timePickerState.minute)
+                        showDailyTimePicker = false
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDailyTimePicker = false },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

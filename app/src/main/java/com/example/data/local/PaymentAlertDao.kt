@@ -12,6 +12,9 @@ interface PaymentAlertDao {
     @Query("SELECT * FROM payment_alerts ORDER BY timestamp DESC")
     fun observeAllAlerts(): Flow<List<PaymentAlertEntity>>
 
+    @Query("SELECT * FROM payment_alerts ORDER BY timestamp DESC")
+    suspend fun getAllAlertsSnapshot(): List<PaymentAlertEntity>
+
     @Query("SELECT * FROM payment_alerts ORDER BY timestamp DESC LIMIT :limit")
     fun observeRecentAlerts(limit: Int): Flow<List<PaymentAlertEntity>>
 

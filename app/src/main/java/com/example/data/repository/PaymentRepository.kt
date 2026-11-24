@@ -9,6 +9,8 @@ class PaymentRepository(private val dao: PaymentAlertDao) {
 
     val allAlerts: Flow<List<PaymentAlertEntity>> = dao.observeAllAlerts()
 
+    suspend fun getAllAlertsSnapshot(): List<PaymentAlertEntity> = dao.getAllAlertsSnapshot()
+
     fun recentAlerts(limit: Int = 5): Flow<List<PaymentAlertEntity>> =
         dao.observeRecentAlerts(limit)
 

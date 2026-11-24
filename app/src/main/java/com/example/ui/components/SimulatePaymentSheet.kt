@@ -104,7 +104,8 @@ fun SimulatePaymentSheet(
             OutlinedTextField(
                 value = senderText,
                 onValueChange = { senderText = it },
-                label = { Text("Sender Name (Optional)") },
+                label = { Text("Sender Name or Number (Optional)") },
+                placeholder = { Text("e.g. 9864843502 or Ramesh") },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()

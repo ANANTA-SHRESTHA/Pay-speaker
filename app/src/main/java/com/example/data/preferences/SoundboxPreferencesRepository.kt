@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -15,6 +16,14 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "soundbox_prefs")
 
 class SoundboxPreferencesRepository(private val context: Context) {
+
+    @Volatile
+    var latestSettings: SoundboxSettings = SoundboxSettings()
+        private set
+
+    @Volatile
+    var hasLoadedFromDisk: Boolean = false
+        private set
 
     private object Keys {
         val SPEAKER_ENABLED = booleanPreferencesKey("speaker_enabled")
@@ -31,6 +40,9 @@ class SoundboxPreferencesRepository(private val context: Context) {
         val ANNOUNCE_SOURCE = booleanPreferencesKey("announce_source")
         val REPEAT_TWICE = booleanPreferencesKey("repeat_twice")
         val FOREGROUND_GUARD = booleanPreferencesKey("foreground_guard")
+        val DAILY_SUMMARY_ENABLED = booleanPreferencesKey("daily_summary_enabled")
+        val DAILY_SUMMARY_HOUR = intPreferencesKey("daily_summary_hour")
+        val DAILY_SUMMARY_MINUTE = intPreferencesKey("daily_summary_minute")
         val ENABLED_CHANNELS = stringSetPreferencesKey("enabled_channels")
     }
 
@@ -57,16 +69,22 @@ class SoundboxPreferencesRepository(private val context: Context) {
             selectedVoiceName = prefs[Keys.SELECTED_VOICE_NAME]?.takeIf { it.isNotBlank() },
             voiceSourceMode = voiceSourceMode,
             ownVoiceFilePath = prefs[Keys.OWN_VOICE_PATH]?.takeIf { it.isNotBlank() },
-            speechRate = (prefs[Keys.SPEECH_RATE] ?: 1.0f).coerceIn(0.6f, 1.6f),
-            speechPitch = (prefs[Keys.SPEECH_PITCH] ?: 1.0f).coerceIn(0.7f, 1.4f),
+            speechRate = (prefs[Keys.SPEECH_RATE] ?: 0.96f).coerceIn(0.6f, 1.6f),
+            speechPitch = (prefs[Keys.SPEECH_PITCH] ?: 1.04f).coerceIn(0.7f, 1.4f),
             boostVolume = prefs[Keys.BOOST_VOLUME] ?: true,
             playChime = prefs[Keys.PLAY_CHIME] ?: true,
             announceSender = prefs[Keys.ANNOUNCE_SENDER] ?: true,
-            announceSource = prefs[Keys.ANNOUNCE_SOURCE] ?: true,
+            announceSource = prefs[Keys.ANNOUNCE_SOURCE] ?: false,
             repeatTwice = prefs[Keys.REPEAT_TWICE] ?: false,
             foregroundGuardEnabled = prefs[Keys.FOREGROUND_GUARD] ?: false,
+            dailySummaryEnabled = prefs[Keys.DAILY_SUMMARY_ENABLED] ?: true,
+            dailySummaryHour = (prefs[Keys.DAILY_SUMMARY_HOUR] ?: 21).coerceIn(0, 23),
+            dailySummaryMinute = (prefs[Keys.DAILY_SUMMARY_MINUTE] ?: 0).coerceIn(0, 59),
             enabledChannels = enabledChannels,
-        )
+        ).also { mapped ->
+            latestSettings = mapped
+            hasLoadedFromDisk = true
+        }
     }
 
     suspend fun setSpeakerEnabled(enabled: Boolean) {
@@ -137,6 +155,17 @@ class SoundboxPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.FOREGROUND_GUARD] = enabled }
     }
 
+    suspend fun setDailySummaryEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.DAILY_SUMMARY_ENABLED] = enabled }
+    }
+
+    suspend fun setDailySummaryTime(hour: Int, minute: Int) {
+        context.dataStore.edit {
+            it[Keys.DAILY_SUMMARY_HOUR] = hour.coerceIn(0, 23)
+            it[Keys.DAILY_SUMMARY_MINUTE] = minute.coerceIn(0, 59)
+        }
+    }
+
     suspend fun toggleChannel(channel: PaymentChannel) {
         context.dataStore.edit { prefs ->
             val current = prefs[Keys.ENABLED_CHANNELS]
@@ -147,6 +176,32 @@ class SoundboxPreferencesRepository(private val context: Context) {
                 current + channel.name
             }
             prefs[Keys.ENABLED_CHANNELS] = updated
+        }
+    }
+
+    suspend fun applyCloudSettings(
+        merchantName: String,
+        language: VoiceLanguage,
+        speechRate: Float,
+        speechPitch: Float,
+        boostVolume: Boolean,
+        playChime: Boolean,
+        announceSender: Boolean,
+        announceSource: Boolean,
+        repeatTwice: Boolean,
+        enabledChannels: Set<PaymentChannel>,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.MERCHANT_NAME] = merchantName.take(40)
+            prefs[Keys.LANGUAGE] = language.name
+            prefs[Keys.SPEECH_RATE] = speechRate.coerceIn(0.6f, 1.6f)
+            prefs[Keys.SPEECH_PITCH] = speechPitch.coerceIn(0.7f, 1.4f)
+            prefs[Keys.BOOST_VOLUME] = boostVolume
+            prefs[Keys.PLAY_CHIME] = playChime
+            prefs[Keys.ANNOUNCE_SENDER] = announceSender
+            prefs[Keys.ANNOUNCE_SOURCE] = announceSource
+            prefs[Keys.REPEAT_TWICE] = repeatTwice
+            prefs[Keys.ENABLED_CHANNELS] = enabledChannels.map { it.name }.toSet()
         }
     }
 }

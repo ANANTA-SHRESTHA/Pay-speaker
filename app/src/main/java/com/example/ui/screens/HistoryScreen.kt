@@ -20,16 +20,24 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.FilterListOff
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,12 +59,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.local.PaymentAlertEntity
 import com.example.data.preferences.PaymentChannel
 import com.example.domain.DateFilterOption
 import com.example.domain.PaymentNotificationParser
+import com.example.domain.StatementExportResult
 import com.example.domain.TransactionSortOption
 import com.example.ui.components.PaymentAlertRow
 import com.example.ui.viewmodel.PaySpeakerUiState
@@ -73,8 +84,15 @@ fun HistoryScreen(
     onSortOptionSelect: (TransactionSortOption) -> Unit,
     onResetFilters: () -> Unit,
     onReplayAlert: (PaymentAlertEntity) -> Unit,
-    onDeleteAlert: (Long) -> Unit,
+    onDeleteAlert: (PaymentAlertEntity) -> Unit,
     onClearHistory: () -> Unit,
+    onToggleBalanceVisibility: () -> Unit = {},
+    onDownloadStatementPdf: () -> Unit = {},
+    onDownloadStatementCsv: () -> Unit = {},
+    onOpenExportedStatement: (StatementExportResult) -> Unit = {},
+    onShareExportedStatement: (StatementExportResult) -> Unit = {},
+    onDismissExportBanner: () -> Unit = {},
+    onDismissCloudError: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
@@ -127,47 +145,286 @@ fun HistoryScreen(
                 }
             }
 
-            // Summary Banner
+            uiState.cloudSyncError?.let { errorMsg ->
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = errorMsg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = onDismissCloudError) {
+                                Text("Dismiss")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bank-Style Account Total Balance & Statement Download Card
             item {
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(22.dp),
                     color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 1.dp,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                text = stringResource(R.string.history_all_time_total),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = "Rs. ${PaymentNotificationParser.formatAmount(uiState.filteredTotal)}",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val countText = if (hasActiveFilters && uiState.totalAlertsCount > 0) {
-                                "${uiState.filteredAlerts.size} of ${uiState.totalAlertsCount}"
-                            } else {
-                                "${uiState.filteredAlerts.size} records"
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AccountBalance,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Text(
+                                    text = stringResource(R.string.bank_total_balance),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                ) {
+                                    val countText = if (hasActiveFilters && uiState.totalAlertsCount > 0) {
+                                        "${uiState.filteredAlerts.size} of ${uiState.totalAlertsCount}"
+                                    } else {
+                                        "${uiState.totalAlertsCount} credits"
+                                    }
+                                    Text(
+                                        text = countText,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = onToggleBalanceVisibility,
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("history_toggle_balance_button"),
+                                ) {
+                                    Icon(
+                                        imageVector = if (uiState.showBalance) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                        contentDescription = stringResource(
+                                            if (uiState.showBalance) R.string.bank_hide_balance_cd else R.string.bank_show_balance_cd
+                                        ),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = if (uiState.showBalance) {
+                                "NPR ${PaymentNotificationParser.formatAmount(uiState.totalBalance)}"
+                            } else {
+                                "NPR ••••••"
+                            },
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = if (hasActiveFilters) stringResource(R.string.history_all_time_total) else stringResource(R.string.bank_today_inflow),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = if (uiState.showBalance) {
+                                        "Rs. ${PaymentNotificationParser.formatAmount(if (hasActiveFilters) uiState.filteredTotal else uiState.todayTotal)}"
+                                    } else {
+                                        "Rs. ••••"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.bank_month_inflow),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = if (uiState.showBalance) {
+                                        "Rs. ${PaymentNotificationParser.formatAmount(uiState.thisMonthTotal)}"
+                                    } else {
+                                        "Rs. ••••"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Button(
+                                onClick = onDownloadStatementPdf,
+                                enabled = !uiState.isExportingStatement && uiState.filteredAlerts.isNotEmpty(),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("download_pdf_statement_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PictureAsPdf,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .padding(end = 6.dp)
+                                        .size(18.dp),
+                                )
+                                Text(
+                                    text = if (uiState.isExportingStatement) "Exporting…" else stringResource(R.string.statement_download_pdf),
+                                    maxLines = 1,
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = onDownloadStatementCsv,
+                                enabled = !uiState.isExportingStatement && uiState.filteredAlerts.isNotEmpty(),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("download_csv_statement_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.TableChart,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .padding(end = 6.dp)
+                                        .size(18.dp),
+                                )
+                                Text(stringResource(R.string.statement_download_csv), maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+
+            uiState.statementExportError?.let { exportErr ->
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Text(
-                                text = countText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                text = exportErr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.weight(1f),
                             )
+                            TextButton(onClick = onDismissExportBanner) {
+                                Text("Dismiss")
+                            }
+                        }
+                    }
+                }
+            }
+
+            uiState.lastExportResult?.let { exported ->
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = exported.savedLocationLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                FilledTonalButton(
+                                    onClick = { onOpenExportedStatement(exported) },
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("open_exported_statement_button"),
+                                ) {
+                                    Text(stringResource(R.string.statement_open))
+                                }
+                                OutlinedButton(
+                                    onClick = { onShareExportedStatement(exported) },
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("share_exported_statement_button"),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Share,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .padding(end = 6.dp)
+                                            .size(16.dp),
+                                    )
+                                    Text(stringResource(R.string.statement_share))
+                                }
+                                TextButton(
+                                    onClick = onDismissExportBanner,
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text("Dismiss")
+                                }
+                            }
                         }
                     }
                 }
@@ -409,7 +666,7 @@ fun HistoryScreen(
             } else {
                 itemsIndexed(
                     items = uiState.filteredAlerts,
-                    key = { _, alert -> alert.id },
+                    key = { _, alert -> alert.cloudId.ifBlank { alert.id.toString() } },
                 ) { index, alert ->
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (showDateHeaders) {
@@ -431,7 +688,7 @@ fun HistoryScreen(
                         PaymentAlertRow(
                             alert = alert,
                             onReplayClick = { onReplayAlert(alert) },
-                            onDeleteClick = { onDeleteAlert(alert.id) },
+                            onDeleteClick = { onDeleteAlert(alert) },
                         )
                     }
                 }

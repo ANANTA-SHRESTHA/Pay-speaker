@@ -7,6 +7,8 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -22,6 +24,7 @@ import com.example.service.TtsVoiceOption
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -59,13 +62,46 @@ class PaymentSpeakerEngine(
     private var activeUtteranceDeferred: CompletableDeferred<Unit>? = null
 
     @Volatile
+    private var speakingTimeoutJob: Job? = null
+
+    @Volatile
     private var activeMediaPlayer: MediaPlayer? = null
 
     @Volatile
     private var activeMediaDeferred: CompletableDeferred<Unit>? = null
 
+    @Volatile
+    private var cachedSupportedLanguages: Set<VoiceLanguage> = setOf(VoiceLanguage.ENGLISH)
+
+    @Volatile
+    private var cachedBestOfflineVoiceByLang: Map<VoiceLanguage, Voice?> = emptyMap()
+
+    @Volatile
+    private var cachedBestAnyVoiceByLang: Map<VoiceLanguage, Voice?> = emptyMap()
+
+    @Volatile
+    private var cachedVoicesByName: Map<String, Voice> = emptyMap()
+
+    @Volatile
+    private var lastKnownSettings: SoundboxSettings = SoundboxSettings()
+
+    @Volatile
+    private var appliedVoiceKey: String? = null
+
+    @Volatile
+    private var appliedRate: Float = Float.NaN
+
+    @Volatile
+    private var appliedPitch: Float = Float.NaN
+
     private var savedPreviousVolume: Int? = null
     private var focusRequest: AudioFocusRequest? = null
+
+    private val chimePcmBuffer: ShortArray = buildPrecomputedChimePcm()
+    private val instantTtsParams = Bundle().apply {
+        putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+        putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+    }
 
     init {
         initTts()
@@ -77,10 +113,6 @@ class PaymentSpeakerEngine(
             tts = TextToSpeech(context.applicationContext) { status ->
                 if (status == TextToSpeech.SUCCESS) {
                     isInitialized = true
-                    val available = detectAvailableLanguages()
-                    val voices = extractAvailableVoices()
-                    val enginePkg = tts?.defaultEngine.orEmpty().ifBlank { "Android TTS" }
-                    stateHolder.setTtsReady(true, available, enginePkg, voices)
                     tts?.setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -93,6 +125,7 @@ class PaymentSpeakerEngine(
                         override fun onDone(utteranceId: String?) {
                             if (utteranceId == activeFinalUtteranceId) {
                                 activeUtteranceDeferred?.complete(Unit)
+                                onTtsUtteranceCompleted()
                             }
                         }
 
@@ -100,18 +133,25 @@ class PaymentSpeakerEngine(
                         override fun onError(utteranceId: String?) {
                             if (utteranceId == activeFinalUtteranceId || utteranceId != null) {
                                 activeUtteranceDeferred?.complete(Unit)
+                                onTtsUtteranceCompleted()
                             }
                         }
 
                         override fun onError(utteranceId: String?, errorCode: Int) {
                             Log.w(TAG, "TTS utterance error code=$errorCode id=$utteranceId")
                             activeUtteranceDeferred?.complete(Unit)
+                            onTtsUtteranceCompleted()
                         }
 
                         override fun onStop(utteranceId: String?, interrupted: Boolean) {
                             activeUtteranceDeferred?.complete(Unit)
+                            if (!interrupted) {
+                                onTtsUtteranceCompleted()
+                            }
                         }
                     })
+                    rebuildVoiceCacheAndPublish()
+                    prewarmForSettings(lastKnownSettings, sendSilentWarmup = true)
                     ttsInitSignal.complete(true)
                 } else {
                     Log.w(TAG, "TextToSpeech init failed with status $status")
@@ -126,8 +166,42 @@ class PaymentSpeakerEngine(
         }
     }
 
-    private fun detectAvailableLanguages(): Set<VoiceLanguage> {
-        val engine = tts ?: return setOf(VoiceLanguage.ENGLISH)
+    private fun rebuildVoiceCacheAndPublish() {
+        val engine = tts ?: return
+        val available = detectAvailableLanguages(engine)
+        val rawVoices = runCatching { engine.voices.orEmpty() }.getOrElse { emptySet() }
+        val installedVoices = rawVoices.filter(::isVoiceInstalled)
+
+        val byName = HashMap<String, Voice>(installedVoices.size)
+        for (v in installedVoices) {
+            byName[v.name] = v
+        }
+
+        val offlineMap = HashMap<VoiceLanguage, Voice?>()
+        val anyMap = HashMap<VoiceLanguage, Voice?>()
+        for (lang in VoiceLanguage.entries) {
+            val locale = Locale(lang.languageTag, lang.countryTag)
+            val langVoices = installedVoices.filter {
+                it.locale.language.equals(lang.languageTag, ignoreCase = true)
+            }
+            offlineMap[lang] = langVoices
+                .filter { !it.isNetworkConnectionRequired }
+                .maxByOrNull { naturalVoiceScore(it, locale) }
+            anyMap[lang] = langVoices.maxByOrNull { naturalVoiceScore(it, locale) }
+        }
+
+        cachedSupportedLanguages = available
+        cachedVoicesByName = byName
+        cachedBestOfflineVoiceByLang = offlineMap
+        cachedBestAnyVoiceByLang = anyMap
+        appliedVoiceKey = null
+
+        val voiceOptions = buildVoiceOptions(installedVoices)
+        val enginePkg = engine.defaultEngine.orEmpty().ifBlank { "Android TTS" }
+        stateHolder.setTtsReady(true, available, enginePkg, voiceOptions)
+    }
+
+    private fun detectAvailableLanguages(engine: TextToSpeech): Set<VoiceLanguage> {
         val supported = mutableSetOf<VoiceLanguage>()
         VoiceLanguage.entries.forEach { lang ->
             val locale = Locale(lang.languageTag, lang.countryTag)
@@ -146,21 +220,71 @@ class PaymentSpeakerEngine(
         return supported
     }
 
-    private fun extractAvailableVoices(): List<TtsVoiceOption> {
-        val rawVoices = try {
-            tts?.voices.orEmpty()
+    private fun isVoiceInstalled(voice: Voice): Boolean {
+        val notInstalled = voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+        return !notInstalled
+    }
+
+    private fun isOnlineConnected(): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            val network = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
         } catch (_: Exception) {
-            emptySet()
+            false
         }
+    }
+
+    private fun naturalVoiceScore(voice: Voice, preferredLocale: Locale): Int {
+        var score = 0
+        val nameLower = voice.name.lowercase(Locale.ROOT)
+        if (voice.locale.country.equals(preferredLocale.country, ignoreCase = true)) {
+            score += 400
+        }
+        // Strongly prioritize offline voices for zero-latency (<50ms) local synthesis
+        if (!voice.isNetworkConnectionRequired) {
+            score += 300
+        }
+        score += when {
+            voice.quality >= Voice.QUALITY_VERY_HIGH -> 320
+            voice.quality >= Voice.QUALITY_HIGH -> 220
+            voice.quality >= Voice.QUALITY_NORMAL -> 100
+            else -> 0
+        }
+        if (
+            nameLower.contains("neural") ||
+            nameLower.contains("wavenet") ||
+            nameLower.contains("studio") ||
+            nameLower.contains("journey") ||
+            nameLower.contains("natural") ||
+            nameLower.contains("-smr") ||
+            nameLower.contains("-sfg") ||
+            nameLower.contains("-x-")
+        ) {
+            score += 240
+        }
+        if (nameLower.contains("espeak") || nameLower.contains("compact")) {
+            score -= 220
+        }
+        if (voice.latency <= Voice.LATENCY_NORMAL) {
+            score += 60
+        }
+        return score
+    }
+
+    private fun buildVoiceOptions(installedVoices: List<Voice>): List<TtsVoiceOption> {
         val supportedLangs = setOf("en", "ne", "hi")
-        return rawVoices
+        return installedVoices
             .filter { voice ->
                 voice.locale.language.lowercase(Locale.ROOT) in supportedLangs
             }
             .sortedWith(
                 compareBy<Voice>(
-                    { it.isNetworkConnectionRequired },
                     { it.locale.language },
+                    { it.isNetworkConnectionRequired },
                     { -it.quality },
                     { it.name },
                 )
@@ -168,12 +292,19 @@ class PaymentSpeakerEngine(
             .distinctBy { it.name }
             .take(24)
             .mapIndexed { idx, voice ->
+                val nameLower = voice.name.lowercase(Locale.ROOT)
+                val isNatural = nameLower.contains("neural") ||
+                    nameLower.contains("wavenet") ||
+                    nameLower.contains("studio") ||
+                    nameLower.contains("-x-") ||
+                    voice.quality >= Voice.QUALITY_HIGH
                 val qualityLabel = when {
-                    voice.quality >= Voice.QUALITY_HIGH -> "HD"
+                    voice.quality >= Voice.QUALITY_VERY_HIGH -> "Natural HD"
+                    voice.quality >= Voice.QUALITY_HIGH -> if (isNatural) "Natural HD" else "HD"
                     voice.quality >= Voice.QUALITY_NORMAL -> "Standard"
                     else -> "Compact"
                 }
-                val networkTag = if (voice.isNetworkConnectionRequired) "Online" else "Offline"
+                val networkTag = if (voice.isNetworkConnectionRequired) "Online" else "Instant Offline"
                 val localeTag = voice.locale.toLanguageTag()
                 TtsVoiceOption(
                     name = voice.name,
@@ -184,11 +315,90 @@ class PaymentSpeakerEngine(
             }
     }
 
+    fun prewarmForSettings(settings: SoundboxSettings, sendSilentWarmup: Boolean = false) {
+        lastKnownSettings = settings
+        val engine = tts
+        if (engine == null || !isInitialized) return
+        scope.launch {
+            runCatching {
+                applyVoiceAndTuningIfNeeded(engine, settings)
+                if (sendSilentWarmup && !stateHolder.isSpeaking.value) {
+                    engine.playSilentUtterance(1L, TextToSpeech.QUEUE_ADD, "WARMUP")
+                }
+            }
+        }
+    }
+
+    private fun resolveTargetLanguageAndVoice(settings: SoundboxSettings): Pair<VoiceLanguage, Voice?> {
+        val targetLang = if (settings.language in cachedSupportedLanguages) {
+            settings.language
+        } else {
+            VoiceLanguage.ENGLISH
+        }
+
+        val explicitVoice = settings.selectedVoiceName?.let { cachedVoicesByName[it] }
+        if (explicitVoice != null && targetLang == settings.language) {
+            if (!explicitVoice.isNetworkConnectionRequired || isOnlineConnected()) {
+                return targetLang to explicitVoice
+            }
+        }
+
+        val bestOffline = cachedBestOfflineVoiceByLang[targetLang]
+        if (bestOffline != null) {
+            return targetLang to bestOffline
+        }
+
+        val bestAny = cachedBestAnyVoiceByLang[targetLang]
+        if (bestAny != null && (!bestAny.isNetworkConnectionRequired || isOnlineConnected())) {
+            return targetLang to bestAny
+        }
+
+        return targetLang to null
+    }
+
+    private fun applyVoiceAndTuningIfNeeded(
+        engine: TextToSpeech,
+        settings: SoundboxSettings,
+    ): VoiceLanguage {
+        val (targetLang, voice) = resolveTargetLanguageAndVoice(settings)
+        val desiredVoiceKey = "${targetLang.name}|${voice?.name.orEmpty()}"
+        if (appliedVoiceKey != desiredVoiceKey) {
+            if (voice != null) {
+                engine.voice = voice
+            } else {
+                engine.language = Locale(targetLang.languageTag, targetLang.countryTag)
+            }
+            appliedVoiceKey = desiredVoiceKey
+        }
+        if (appliedRate != settings.speechRate) {
+            engine.setSpeechRate(settings.speechRate)
+            appliedRate = settings.speechRate
+        }
+        if (appliedPitch != settings.speechPitch) {
+            engine.setPitch(settings.speechPitch)
+            appliedPitch = settings.speechPitch
+        }
+        return targetLang
+    }
+
     fun announceText(
         spokenText: String,
         fallbackEnglishText: String,
         settings: SoundboxSettings,
     ) {
+        val engine = tts
+        val clipPath = settings.ownVoiceFilePath?.takeIf {
+            settings.voiceSourceMode != VoiceSourceMode.TTS_VOICE && File(it).exists()
+        }
+
+        // ZERO-LATENCY INSTANT FAST PATH:
+        // Directly fires audio & tts.speak(QUEUE_FLUSH) synchronously without coroutine/mutex/sleep wait!
+        if (engine != null && isInitialized && clipPath == null) {
+            fireTtsInstant(engine, spokenText, fallbackEnglishText, settings)
+            return
+        }
+
+        // Fallback / custom audio clip path
         scope.launch {
             speakMutex.withLock {
                 if (!isInitialized) {
@@ -198,35 +408,84 @@ class PaymentSpeakerEngine(
                 stateHolder.setSpeaking(true, spokenText)
                 requestAudioFocusAndBoost(settings.boostVolume)
 
-                val clipPath = settings.ownVoiceFilePath?.takeIf { File(it).exists() }
-                val useOwnVoice = clipPath != null && settings.voiceSourceMode != VoiceSourceMode.TTS_VOICE
-
-                if (useOwnVoice && clipPath != null) {
+                if (clipPath != null) {
                     playAudioClip(clipPath)
                     if (settings.voiceSourceMode == VoiceSourceMode.OWN_VOICE_ONLY) {
                         if (settings.repeatTwice) {
-                            delay(280)
+                            delay(240)
                             playAudioClip(clipPath)
                         }
                         onPlaybackFinished()
                         return@withLock
                     } else {
-                        delay(150)
-                        speakViaTts(spokenText, fallbackEnglishText, settings)
+                        speakViaTtsSuspended(spokenText, fallbackEnglishText, settings)
                         onPlaybackFinished()
                         return@withLock
                     }
                 }
 
                 if (settings.playChime) {
-                    playMerchantChime()
-                    delay(100)
+                    playChimeNonBlocking()
                 }
-
-                speakViaTts(spokenText, fallbackEnglishText, settings)
+                speakViaTtsSuspended(spokenText, fallbackEnglishText, settings)
                 onPlaybackFinished()
             }
         }
+    }
+
+    private fun fireTtsInstant(
+        engine: TextToSpeech,
+        spokenText: String,
+        fallbackEnglishText: String,
+        settings: SoundboxSettings,
+    ) {
+        runCatching { activeMediaPlayer?.stop() }
+        activeMediaDeferred?.complete(Unit)
+        activeUtteranceDeferred?.complete(Unit)
+
+        stateHolder.setSpeaking(true, spokenText)
+        requestAudioFocusAndBoost(settings.boostVolume)
+
+        if (settings.playChime) {
+            playChimeNonBlocking()
+        }
+
+        val resolvedLang = applyVoiceAndTuningIfNeeded(engine, settings)
+        val textToSpeak = if (resolvedLang == settings.language) spokenText else fallbackEnglishText
+
+        val baseId = UUID.randomUUID().toString()
+        val finalId = "${baseId}_FINAL"
+        activeFinalUtteranceId = finalId
+
+        speakingTimeoutJob?.cancel()
+        val timeoutMs = if (settings.repeatTwice) 14_000L else 8_000L
+        speakingTimeoutJob = scope.launch {
+            delay(timeoutMs)
+            if (activeFinalUtteranceId == finalId) {
+                onTtsUtteranceCompleted()
+            }
+        }
+
+        val speakResult = if (settings.repeatTwice && settings.voiceSourceMode == VoiceSourceMode.TTS_VOICE) {
+            engine.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, instantTtsParams, "${baseId}_1")
+            engine.playSilentUtterance(280L, TextToSpeech.QUEUE_ADD, "${baseId}_GAP")
+            engine.speak(textToSpeak, TextToSpeech.QUEUE_ADD, instantTtsParams, finalId)
+        } else {
+            engine.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, instantTtsParams, finalId)
+        }
+
+        if (speakResult != TextToSpeech.SUCCESS) {
+            Log.w(TAG, "TextToSpeech.speak returned error=$speakResult")
+            onTtsUtteranceCompleted()
+        }
+    }
+
+    private fun onTtsUtteranceCompleted() {
+        speakingTimeoutJob?.cancel()
+        speakingTimeoutJob = null
+        activeFinalUtteranceId = null
+        activeUtteranceDeferred = null
+        onPlaybackFinished()
     }
 
     fun previewAudioClip(filePath: String, boostVolume: Boolean) {
@@ -241,37 +500,15 @@ class PaymentSpeakerEngine(
         }
     }
 
-    private suspend fun speakViaTts(
+    private suspend fun speakViaTtsSuspended(
         spokenText: String,
         fallbackEnglishText: String,
         settings: SoundboxSettings,
     ) {
         val engine = tts
         if (engine != null && isInitialized) {
-            val requestedLocale = Locale(settings.language.languageTag, settings.language.countryTag)
-            val availability = try {
-                engine.isLanguageAvailable(requestedLocale)
-            } catch (_: Exception) {
-                TextToSpeech.LANG_NOT_SUPPORTED
-            }
-
-            val customVoice = settings.selectedVoiceName?.let { targetName ->
-                runCatching { engine.voices?.firstOrNull { it.name == targetName } }.getOrNull()
-            }
-
-            val textToSpeak = if (customVoice != null && availability >= TextToSpeech.LANG_AVAILABLE) {
-                engine.voice = customVoice
-                spokenText
-            } else if (availability >= TextToSpeech.LANG_AVAILABLE) {
-                engine.language = requestedLocale
-                spokenText
-            } else {
-                engine.language = Locale.US
-                fallbackEnglishText
-            }
-
-            engine.setSpeechRate(settings.speechRate)
-            engine.setPitch(settings.speechPitch)
+            val resolvedLang = applyVoiceAndTuningIfNeeded(engine, settings)
+            val textToSpeak = if (resolvedLang == settings.language) spokenText else fallbackEnglishText
 
             val baseId = UUID.randomUUID().toString()
             val finalId = "${baseId}_FINAL"
@@ -279,17 +516,12 @@ class PaymentSpeakerEngine(
             activeFinalUtteranceId = finalId
             activeUtteranceDeferred = completion
 
-            val params = Bundle().apply {
-                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
-            }
-
             val speakResult = if (settings.repeatTwice && settings.voiceSourceMode == VoiceSourceMode.TTS_VOICE) {
-                engine.speak(textToSpeak, TextToSpeech.QUEUE_ADD, params, "${baseId}_1")
-                engine.playSilentUtterance(420L, TextToSpeech.QUEUE_ADD, "${baseId}_GAP")
-                engine.speak(textToSpeak, TextToSpeech.QUEUE_ADD, params, finalId)
+                engine.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, instantTtsParams, "${baseId}_1")
+                engine.playSilentUtterance(280L, TextToSpeech.QUEUE_ADD, "${baseId}_GAP")
+                engine.speak(textToSpeak, TextToSpeech.QUEUE_ADD, instantTtsParams, finalId)
             } else {
-                engine.speak(textToSpeak, TextToSpeech.QUEUE_ADD, params, finalId)
+                engine.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, instantTtsParams, finalId)
             }
 
             if (speakResult == TextToSpeech.SUCCESS) {
@@ -298,13 +530,13 @@ class PaymentSpeakerEngine(
                 }
             } else {
                 Log.w(TAG, "TextToSpeech.speak returned error=$speakResult")
-                delay(800L)
+                delay(400L)
             }
 
             activeFinalUtteranceId = null
             activeUtteranceDeferred = null
         } else {
-            delay(1200L)
+            delay(800L)
         }
     }
 
@@ -360,18 +592,24 @@ class PaymentSpeakerEngine(
             sourceLabel = sourceLabel,
             settings = settings,
         )
-        val englishFallback = SpeechFormatter.formatAnnouncement(
-            amount = amount,
-            currency = currency,
-            senderName = senderName,
-            sourceLabel = sourceLabel,
-            settings = settings.copy(language = VoiceLanguage.ENGLISH),
-        )
+        val englishFallback = if (settings.language == VoiceLanguage.ENGLISH) {
+            localized
+        } else {
+            SpeechFormatter.formatAnnouncement(
+                amount = amount,
+                currency = currency,
+                senderName = senderName,
+                sourceLabel = sourceLabel,
+                settings = settings.copy(language = VoiceLanguage.ENGLISH),
+            )
+        }
         announceText(localized, englishFallback, settings)
         return localized
     }
 
     fun stopSpeaking() {
+        speakingTimeoutJob?.cancel()
+        speakingTimeoutJob = null
         runCatching { tts?.stop() }
         runCatching { activeMediaPlayer?.stop() }
         activeUtteranceDeferred?.complete(Unit)
@@ -382,7 +620,7 @@ class PaymentSpeakerEngine(
     private fun requestAudioFocusAndBoost(boostVolume: Boolean) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                val request = focusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                     .setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -390,7 +628,7 @@ class PaymentSpeakerEngine(
                             .build()
                     )
                     .build()
-                focusRequest = request
+                    .also { focusRequest = it }
                 audioManager.requestAudioFocus(request)
             } else {
                 @Suppress("DEPRECATION")
@@ -406,7 +644,9 @@ class PaymentSpeakerEngine(
                 val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 val target = (max * 0.85f).toInt().coerceAtLeast(1)
                 if (current < target) {
-                    savedPreviousVolume = current
+                    if (savedPreviousVolume == null) {
+                        savedPreviousVolume = current
+                    }
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
                 }
             }
@@ -424,37 +664,15 @@ class PaymentSpeakerEngine(
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
-                focusRequest = null
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed restoring audio state: ${e.message}")
         }
     }
 
-    private fun playMerchantChime() {
+    private fun playChimeNonBlocking() {
         try {
-            val sampleRate = 22050
-            val note1Samples = (sampleRate * 0.14).toInt()
-            val note2Samples = (sampleRate * 0.24).toInt()
-            val totalSamples = note1Samples + note2Samples
-            val buffer = ShortArray(totalSamples)
-
-            for (i in 0 until note1Samples) {
-                val t = i.toDouble() / sampleRate
-                val env = exp(-t * 14.0) * (1.0 - exp(-t * 240.0))
-                val sample = (sin(2.0 * PI * 783.99 * t) + 0.35 * sin(2.0 * PI * 1567.98 * t)) * env
-                buffer[i] = (sample * 0.55 * Short.MAX_VALUE).toInt()
-                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-            }
-
-            for (i in 0 until note2Samples) {
-                val t = i.toDouble() / sampleRate
-                val env = exp(-t * 9.5) * (1.0 - exp(-t * 240.0))
-                val sample = (sin(2.0 * PI * 1046.50 * t) + 0.3 * sin(2.0 * PI * 2093.0 * t)) * env
-                buffer[note1Samples + i] = (sample * 0.6 * Short.MAX_VALUE).toInt()
-                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-            }
-
+            val sampleRate = 44100
             val track = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -469,29 +687,57 @@ class PaymentSpeakerEngine(
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build()
                 )
-                .setBufferSizeInBytes(buffer.size * 2)
+                .setBufferSizeInBytes(chimePcmBuffer.size * 2)
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
 
-            track.write(buffer, 0, buffer.size)
+            track.write(chimePcmBuffer, 0, chimePcmBuffer.size)
             track.play()
-            Thread.sleep(390)
-            track.stop()
-            track.release()
+            scope.launch {
+                delay(200)
+                runCatching { track.stop() }
+                runCatching { track.release() }
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Chime playback skipped: ${e.message}")
         }
     }
 
+    private fun buildPrecomputedChimePcm(): ShortArray {
+        val sampleRate = 44100
+        val note1Samples = (sampleRate * 0.065).toInt()
+        val note2Samples = (sampleRate * 0.115).toInt()
+        val buffer = ShortArray(note1Samples + note2Samples)
+
+        // Crisp 180ms studio ding-dong (E5 -> A5) precomputed once at startup for zero runtime latency
+        for (i in 0 until note1Samples) {
+            val t = i.toDouble() / sampleRate
+            val env = exp(-t * 22.0) * (1.0 - exp(-t * 360.0))
+            val sample = (sin(2.0 * PI * 659.25 * t) + 0.25 * sin(2.0 * PI * 1318.51 * t)) * env
+            buffer[i] = (sample * 0.50 * Short.MAX_VALUE).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+
+        for (i in 0 until note2Samples) {
+            val t = i.toDouble() / sampleRate
+            val env = exp(-t * 14.0) * (1.0 - exp(-t * 360.0))
+            val sample = (sin(2.0 * PI * 880.00 * t) + 0.22 * sin(2.0 * PI * 1760.00 * t)) * env
+            buffer[note1Samples + i] = (sample * 0.55 * Short.MAX_VALUE).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+        return buffer
+    }
+
     fun refreshLanguages() {
         if (isInitialized) {
-            val enginePkg = tts?.defaultEngine.orEmpty().ifBlank { "Android TTS" }
-            stateHolder.setTtsReady(true, detectAvailableLanguages(), enginePkg, extractAvailableVoices())
+            rebuildVoiceCacheAndPublish()
+            prewarmForSettings(lastKnownSettings)
         }
     }
 
     fun shutdown() {
         try {
+            speakingTimeoutJob?.cancel()
             activeUtteranceDeferred?.complete(Unit)
             activeMediaDeferred?.complete(Unit)
             activeMediaPlayer?.release()

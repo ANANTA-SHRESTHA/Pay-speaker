@@ -1,9 +1,11 @@
 package com.example.service
 
 import com.example.data.preferences.VoiceLanguage
+import com.example.domain.PaymentNotificationParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
 
 data class TtsVoiceOption(
     val name: String,
@@ -13,6 +15,8 @@ data class TtsVoiceOption(
 )
 
 class SoundboxStateHolder {
+    private val recentPaymentTimestamps = LinkedHashMap<String, Long>()
+
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
@@ -60,5 +64,37 @@ class SoundboxStateHolder {
 
     fun setForegroundGuardRunning(running: Boolean) {
         _foregroundGuardRunning.value = running
+    }
+
+    /**
+     * Returns true if this payment should be processed (not seen recently across SMS/notifications).
+     * Returns false if a matching amount + sender was already recorded within [windowMs].
+     */
+    @Synchronized
+    fun tryMarkRecentPayment(
+        amount: Double,
+        senderName: String?,
+        nowMs: Long = System.currentTimeMillis(),
+        windowMs: Long = DEDUP_WINDOW_MS,
+    ): Boolean {
+        val iterator = recentPaymentTimestamps.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (nowMs - entry.value > windowMs) {
+                iterator.remove()
+            }
+        }
+        val normalizedSender = senderName.orEmpty().trim().lowercase(Locale.ROOT)
+        val fingerprint = "${PaymentNotificationParser.formatAmount(amount)}|$normalizedSender"
+        val previous = recentPaymentTimestamps[fingerprint]
+        if (previous != null && nowMs - previous <= windowMs) {
+            return false
+        }
+        recentPaymentTimestamps[fingerprint] = nowMs
+        return true
+    }
+
+    companion object {
+        private const val DEDUP_WINDOW_MS = 10_000L
     }
 }

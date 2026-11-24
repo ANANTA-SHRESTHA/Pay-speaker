@@ -31,6 +31,9 @@
     <string name="perm_notif_title">Allow Status Notifications</string>
     <string name="perm_notif_desc">Required on Android 13+ to keep the Soundbox monitor visible and reliable in the background.</string>
     <string name="perm_notif_cta">Allow</string>
+    <string name="perm_sms_title">SMS Payment Detection</string>
+    <string name="perm_sms_desc">Allow PaySpeaker to read incoming bank and Fonepay payment alert SMS automatically.</string>
+    <string name="perm_sms_cta">Allow SMS</string>
 
     <!-- History Screen -->
     <string name="history_title">Payment Ledger</string>
@@ -57,7 +60,7 @@
     <string name="settings_speech_rate">Speech Speed</string>
     <string name="settings_speech_pitch">Voice Pitch</string>
     <string name="settings_tts_voice_label">Custom TTS Voice</string>
-    <string name="settings_tts_voice_default">System Default Voice</string>
+    <string name="settings_tts_voice_default">Auto Natural Voice (Recommended)</string>
     <string name="settings_own_voice_section">Own Voice &amp; Custom Audio</string>
     <string name="settings_own_voice_desc">Record your own shop greeting or import an audio clip to play when payments arrive.</string>
     <string name="settings_record_start">Record Own Voice</string>
@@ -71,10 +74,11 @@
     <string name="settings_chime_desc">Play a crisp merchant ding-dong tone before speaking</string>
     <string name="settings_boost_title">Speaker Volume Boost</string>
     <string name="settings_boost_desc">Raise media volume during payment announcements</string>
-    <string name="settings_sender_title">Announce Sender Name</string>
-    <string name="settings_sender_desc">Speak who sent the payment when detected</string>
+    <string name="settings_sender_title">Announce Sender Name or Number</string>
+    <string name="settings_sender_desc">Speak who sent the payment or their phone number when detected</string>
     <string name="settings_source_title">Announce Payment App</string>
     <string name="settings_source_desc">Mention eSewa, Khalti, Fonepay, or Bank</string>
+    <string name="settings_read_mode_label">What to Read Aloud</string>
     <string name="settings_repeat_title">Repeat Twice</string>
     <string name="settings_repeat_desc">Useful for noisy shops and busy counters</string>
     <string name="settings_test_voice">Test Current Voice</string>
@@ -94,4 +98,50 @@
     <string name="fg_action_test">Test Sound</string>
     <string name="fg_action_mute">Mute</string>
     <string name="fg_action_resume">Resume</string>
+
+    <!-- Account & Google Sign-In -->
+    <string name="auth_headline">Merchant Soundbox, Synced Everywhere</string>
+    <string name="auth_subhead">Sign in with Google to back up your payment ledger, sync merchant voice preferences, and restore alerts across devices.</string>
+    <string name="auth_sign_in_google">Sign in with Google</string>
+    <string name="auth_signing_in">Signing in…</string>
+    <string name="auth_feature_ledger">Real-time Cloud Payment Ledger</string>
+    <string name="auth_feature_voice">Synced Merchant Name &amp; Voice Pitch</string>
+    <string name="auth_feature_security">Private Per-Account Isolation</string>
+    <string name="settings_account_section">Cloud Account &amp; Sync</string>
+    <string name="settings_cloud_synced">Firestore Synced</string>
+    <string name="settings_sign_out">Sign Out</string>
+
+    <!-- Bank Balance & Statement Download -->
+    <string name="bank_total_balance">Total Balance</string>
+    <string name="bank_merchant_account">Merchant Account</string>
+    <string name="bank_today_inflow">Today</string>
+    <string name="bank_month_inflow">This Month</string>
+    <string name="bank_hide_balance_cd">Hide balance</string>
+    <string name="bank_show_balance_cd">Show balance</string>
+    <string name="statement_download_pdf">Download PDF</string>
+    <string name="statement_download_csv">Export CSV</string>
+    <string name="statement_share">Share</string>
+    <string name="statement_open">Open</string>
+    <string name="statement_section_title">Account Statement</string>
+    <string name="statement_empty_hint">Record or receive at least one payment to download a statement.</string>
+
+    <!-- Daily Summary Scheduled Notification -->
+    <string name="daily_summary_channel_name">Daily Balance Summary</string>
+    <string name="daily_summary_channel_desc">Daily push notification summarizing payments received and total balance</string>
+    <string name="settings_daily_summary_section">Daily Balance Summary</string>
+    <string name="settings_daily_summary_title">Daily Summary Notification</string>
+    <string name="settings_daily_summary_desc">Automatically calculate total balance received and send a daily transaction summary</string>
+    <string name="settings_daily_summary_time">Notification Time</string>
+    <string name="settings_daily_summary_send_now">Send Summary Now</string>
+    <string name="settings_daily_summary_sent_toast">Daily summary notification sent</string>
+    <string name="settings_daily_summary_perm_hint">Notification permission is required to display daily summary alerts.</string>
+
+    <!-- Google AdMob Monetization -->
+    <string name="settings_ads_section">App Monetization (Google AdMob)</string>
+    <string name="settings_ads_desc">Anchored adaptive banner ads support free merchant soundbox updates.</string>
+    <string name="settings_ads_mode_test">Test Ad Units Active</string>
+    <string name="settings_ads_mode_live">Live Production Ad Units</string>
+    <string name="settings_ads_sdk_ready">AdMob SDK Ready</string>
+    <string name="settings_ads_sdk_loading">Initializing Ads…</string>
+    <string name="settings_ads_reload">Reload Banner Ad</string>
 </resources>

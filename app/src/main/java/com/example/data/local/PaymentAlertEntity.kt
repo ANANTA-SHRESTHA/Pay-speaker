@@ -19,4 +19,5 @@ data class PaymentAlertEntity(
     val wasSpoken: Boolean,
     val isSimulated: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
+    val cloudId: String = "",
 )

@@ -1,0 +1,156 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all access unless explicitly permitted below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidPaymentAlert(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             (data.amount is float || data.amount is int) &&
+             data.amount > 0 && data.amount <= 1000000000 &&
+             data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 16 &&
+             data.formattedAmount is string && data.formattedAmount.size() >= 1 && data.formattedAmount.size() <= 32 &&
+             (!('senderName' in data) || (data.senderName is string && data.senderName.size() <= 120)) &&
+             data.channelName is string &&
+             data.channelName in [
+               'ESEWA', 'KHALTI', 'FONEPAY', 'IME_PAY',
+               'CONNECT_IPS', 'BANK_ALERT', 'OTHER_WALLET'
+             ] &&
+             data.sourceLabel is string && data.sourceLabel.size() >= 1 && data.sourceLabel.size() <= 60 &&
+             data.packageName is string && data.packageName.size() >= 1 && data.packageName.size() <= 200 &&
+             data.rawTitle is string && data.rawTitle.size() <= 300 &&
+             data.rawMessage is string && data.rawMessage.size() <= 1000 &&
+             data.spokenText is string && data.spokenText.size() <= 1000 &&
+             data.spoken is bool &&
+             data.simulated is bool &&
+             data.clientTimestamp is int &&
+             data.clientTimestamp > 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidMerchantSettings(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.merchantName is string && data.merchantName.size() <= 40 &&
+             data.language is string && data.language in ['ENGLISH', 'NEPALI', 'HINDI'] &&
+             (data.speechRate is float || data.speechRate is int) &&
+             data.speechRate >= 0.6 && data.speechRate <= 1.6 &&
+             (data.speechPitch is float || data.speechPitch is int) &&
+             data.speechPitch >= 0.7 && data.speechPitch <= 1.4 &&
+             data.boostVolume is bool &&
+             data.playChime is bool &&
+             data.announceSender is bool &&
+             data.announceSource is bool &&
+             data.repeatTwice is bool &&
+             data.enabledChannels is list &&
+             data.enabledChannels.size() <= 10 &&
+             (data.enabledChannels.size() == 0 || data.enabledChannels[0] is string) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /users/{userId}/payment_alerts/{alertId} {
+      allow get: if isOwner(userId) && isValidId(alertId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(alertId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'amount', 'currency', 'formattedAmount',
+                         'channelName', 'sourceLabel', 'packageName',
+                         'rawTitle', 'rawMessage', 'spokenText',
+                         'spoken', 'simulated', 'clientTimestamp',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'amount', 'currency', 'formattedAmount',
+                         'senderName', 'channelName', 'sourceLabel', 'packageName',
+                         'rawTitle', 'rawMessage', 'spokenText',
+                         'spoken', 'simulated', 'clientTimestamp',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidPaymentAlert(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(alertId) &&
+                       isValidPaymentAlert(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().clientTimestamp == existing().clientTimestamp &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'spoken', 'spokenText', 'senderName', 'updatedAt'
+                         ])
+                       );
+
+      allow delete: if isOwner(userId) && isValidId(alertId);
+    }
+
+    match /users/{userId}/merchant_settings/{settingId} {
+      allow get: if isOwner(userId) && isValidId(settingId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(settingId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'merchantName', 'language',
+                         'speechRate', 'speechPitch',
+                         'boostVolume', 'playChime', 'announceSender',
+                         'announceSource', 'repeatTwice', 'enabledChannels',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'merchantName', 'language',
+                         'speechRate', 'speechPitch',
+                         'boostVolume', 'playChime', 'announceSender',
+                         'announceSource', 'repeatTwice', 'enabledChannels',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidMerchantSettings(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(settingId) &&
+                       isValidMerchantSettings(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'merchantName', 'language', 'speechRate', 'speechPitch',
+                           'boostVolume', 'playChime', 'announceSender',
+                           'announceSource', 'repeatTwice', 'enabledChannels',
+                           'updatedAt'
+                         ])
+                       );
+
+      allow delete: if isOwner(userId) && isValidId(settingId);
+    }
+  }
+}

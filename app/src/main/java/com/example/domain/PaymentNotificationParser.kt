@@ -76,8 +76,30 @@ object PaymentNotificationParser {
     )
 
     private val senderRegex = Regex(
-        """(?i)\b(?:from|by)\s+([A-Za-z0-9\u0900-\u097F][A-Za-z0-9\u0900-\u097F .'*_-]{1,36}?)(?=\s*(?:\(|on\b|for\b|at\b|via\b|remarks\b|ref\b|\.|,|!|$))"""
+        """(?i)\b(?:from|by)\s+([A-Za-z0-9\u0900-\u097F][A-Za-z0-9\u0900-\u097F .'*_-]{1,40}?)(?=\s*(?:[\r\n]|\(|on\b|for\b|to\b|at\b|via\b|remarks\b|ref\b|rrn\b|support\b|toll-free\b|\.|,|!|$))"""
     )
+
+    private val remarksBlockRegex = Regex(
+        """(?i)\bremarks\s*:\s*([^\r\n]+)"""
+    )
+
+    private val supportNoiseRegex = Regex(
+        """(?i)(?:for\s+support|support\s+center|toll-free\s+number|helpline).*"""
+    )
+
+    private val nepaliMobileRegex = Regex("""\b(9[678]\d{8})\b""")
+
+    private val maskedMobileRegex = Regex("""\b(9[678]\d{1,3}[xX*]{3,6}\d{0,4})\b""")
+
+    private val currencyPrefixRegex = Regex(
+        """(?i)^(?:npr|nrs\.?|rs\.?|inr|usd|रू\.?|₹|\$)(?:\s|$|[0-9])"""
+    )
+
+    private val formattedCurrencyNumberRegex = Regex("""^[0-9,]+(?:\.[0-9]{1,2})$|^[0-9]{1,3}(?:,[0-9]{3})+$""")
+
+    private val swiftOrSystemCodeRegex = Regex("""^[A-Z0-9]{2,12}$""")
+
+    private val bankSwiftCodeRegex = Regex("""^[A-Z]{4}NPK[A-Z]?$""")
 
     fun parse(
         packageName: String,
@@ -199,26 +221,87 @@ object PaymentNotificationParser {
     }
 
     private fun extractSender(text: String): String? {
-        val match = senderRegex.find(text) ?: return null
-        val candidate = match.groupValues[1]
-            .trim()
+        val cleaned = supportNoiseRegex.replace(text, " ").trim()
+
+        // 1. Check explicit "From <sender>" or "by <sender>" (skipping currency phrases like "credited by NPR 3,500.00")
+        for (match in senderRegex.findAll(cleaned)) {
+            val candidate = sanitizeSenderCandidate(match.groupValues[1])
+            if (isValidSenderCandidate(candidate)) {
+                return candidate
+            }
+        }
+
+        // 2. Check Nepali bank/wallet Remarks fields (e.g. "Remarks: MB/esewa/LAW:1795228122408:CTZNNPK/5:Ananta Shrest.")
+        val remarksMatch = remarksBlockRegex.find(cleaned)
+        if (remarksMatch != null) {
+            val remarksBody = remarksMatch.groupValues[1]
+                .substringBefore(". ")
+                .trim()
+                .trimEnd('.')
+
+            // Prefer 10-digit Nepali mobile number if present in remarks
+            val mobileInRemarks = nepaliMobileRegex.find(remarksBody)?.groupValues?.get(1)
+                ?: maskedMobileRegex.find(remarksBody)?.groupValues?.get(1)
+            if (mobileInRemarks != null) {
+                return mobileInRemarks
+            }
+
+            // Otherwise check the trailing descriptive segment (e.g., ":Ananta Shrest")
+            val segments = remarksBody.split(':', '/')
+                .map { sanitizeSenderCandidate(it) }
+                .filter { it.isNotBlank() }
+
+            val candidate = segments.lastOrNull()
+            if (candidate != null && isValidSenderCandidate(candidate, fromRemarks = true)) {
+                return candidate
+            }
+        }
+
+        return null
+    }
+
+    private fun sanitizeSenderCandidate(raw: String): String =
+        raw.trim()
             .trimEnd('.', ',', '-', ':')
             .replace(Regex("""\s+"""), " ")
+
+    private fun isValidSenderCandidate(candidate: String, fromRemarks: Boolean = false): Boolean {
+        if (candidate.length < 2) return false
+        if (currencyPrefixRegex.containsMatchIn(candidate)) return false
+        if (formattedCurrencyNumberRegex.matches(candidate)) return false
+        if (bankSwiftCodeRegex.matches(candidate)) return false
 
         val lowerCandidate = candidate.lowercase(Locale.ROOT)
         val invalidSenders = setOf(
             "esewa",
             "khalti",
             "fonepay",
+            "fonepay qr",
+            "fonepayqr",
             "ime pay",
+            "imepay",
             "connectips",
             "your account",
             "bank",
             "qr",
+            "law",
+            "mb",
+            "ibft",
+            "rrn",
+            "test",
+            "remarks",
+            "support",
         )
-        if (candidate.length < 2 || lowerCandidate in invalidSenders) {
-            return null
+        if (lowerCandidate in invalidSenders) return false
+
+        if (fromRemarks) {
+            // In remarks segments, avoid system codes/digits unless it's a real mobile number
+            val hasLetters = candidate.any { it.isLetter() }
+            if (!hasLetters) return false
+            if (swiftOrSystemCodeRegex.matches(candidate) && candidate == candidate.uppercase(Locale.ROOT)) {
+                return false
+            }
         }
-        return candidate
+        return true
     }
 }

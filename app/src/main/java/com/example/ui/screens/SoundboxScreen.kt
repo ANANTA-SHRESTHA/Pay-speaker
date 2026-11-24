@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -49,14 +48,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.local.PaymentAlertEntity
+import com.example.data.preferences.AnnouncementReadMode
 import com.example.data.preferences.PaymentChannel
 import com.example.domain.PaymentNotificationParser
+import com.example.domain.SpeechFormatter
+import com.example.domain.StatementExportResult
+import com.example.ui.components.BankBalanceCard
 import com.example.ui.components.ListenerPermissionCard
 import com.example.ui.components.PaymentAlertRow
 import com.example.ui.components.PostNotificationPermissionCard
 import com.example.ui.components.SimulatePaymentSheet
+import com.example.ui.components.SmsPermissionCard
 import com.example.ui.components.SoundboxHardwareCard
 import com.example.ui.viewmodel.PaySpeakerUiState
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material3.FilterChip
 
 @Composable
 fun SoundboxScreen(
@@ -65,9 +71,17 @@ fun SoundboxScreen(
     onStopSpeaking: () -> Unit,
     onGrantListenerAccess: () -> Unit,
     onRequestPostNotifications: () -> Unit,
+    onRequestSmsPermission: () -> Unit = {},
     onSimulatePayment: (Double, String, String?, PaymentChannel) -> Unit,
     onReplayAlert: (PaymentAlertEntity) -> Unit,
     onViewAllHistory: () -> Unit,
+    onSelectReadMode: (AnnouncementReadMode) -> Unit = {},
+    onToggleBalanceVisibility: () -> Unit = {},
+    onDownloadStatementPdf: () -> Unit = {},
+    onOpenExportedStatement: (StatementExportResult) -> Unit = {},
+    onShareExportedStatement: (StatementExportResult) -> Unit = {},
+    onDismissExportBanner: () -> Unit = {},
+    onDismissCloudError: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showSimulateSheet by remember { mutableStateOf(false) }
@@ -103,7 +117,9 @@ fun SoundboxScreen(
                         )
                     }
 
-                    if (uiState.permissions.notificationListenerGranted) {
+                    val listeningActive = uiState.permissions.notificationListenerGranted ||
+                        uiState.permissions.smsPermissionGranted
+                    if (listeningActive) {
                         Surface(
                             shape = RoundedCornerShape(50),
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -138,13 +154,20 @@ fun SoundboxScreen(
                     currentUtterance = uiState.currentUtterance,
                     merchantName = uiState.settings.merchantName,
                     lastAlert = uiState.recentAlerts.firstOrNull(),
-                    listenerGranted = uiState.permissions.notificationListenerGranted,
+                    listenerGranted = uiState.permissions.notificationListenerGranted ||
+                        uiState.permissions.smsPermissionGranted,
                     onToggleSpeaker = onToggleSpeaker,
                     onStopSpeaking = onStopSpeaking,
                 )
             }
 
             // Permissions Setup Cards (when not yet granted)
+            if (!uiState.permissions.smsPermissionGranted) {
+                item {
+                    SmsPermissionCard(onAllowClick = onRequestSmsPermission)
+                }
+            }
+
             if (!uiState.permissions.notificationListenerGranted) {
                 item {
                     ListenerPermissionCard(onGrantClick = onGrantListenerAccess)
@@ -157,67 +180,146 @@ fun SoundboxScreen(
                 }
             }
 
-            // Today's Collection Summary Strip
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+            uiState.cloudSyncError?.let { errorMsg ->
+                item {
                     Surface(
-                        modifier = Modifier.weight(1.35f),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.AccountBalanceWallet,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    text = stringResource(R.string.soundbox_today_total),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
                             Text(
-                                text = "Rs. ${PaymentNotificationParser.formatAmount(uiState.todayTotal)}",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                text = errorMsg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.weight(1f),
                             )
+                            TextButton(onClick = onDismissCloudError) {
+                                Text("Dismiss")
+                            }
                         }
                     }
+                }
+            }
 
+            // Bank-Style Total Balance & Statement Card
+            item {
+                BankBalanceCard(
+                    merchantName = uiState.settings.merchantName,
+                    userDisplayName = uiState.userDisplayName,
+                    totalBalance = uiState.totalBalance,
+                    totalCount = uiState.totalAlertsCount,
+                    todayTotal = uiState.todayTotal,
+                    todayCount = uiState.todayCount,
+                    thisMonthTotal = uiState.thisMonthTotal,
+                    thisMonthCount = uiState.thisMonthCount,
+                    showBalance = uiState.showBalance,
+                    isExporting = uiState.isExportingStatement,
+                    onToggleBalanceVisibility = onToggleBalanceVisibility,
+                    onDownloadStatementPdf = onDownloadStatementPdf,
+                    onViewStatement = onViewAllHistory,
+                )
+            }
+
+            uiState.lastExportResult?.let { exported ->
+                item {
                     Surface(
-                        modifier = Modifier.weight(0.95f),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp,
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = "Today's Count",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = exported.savedLocationLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                TextButton(
+                                    onClick = { onOpenExportedStatement(exported) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text(stringResource(R.string.statement_open))
+                                }
+                                TextButton(
+                                    onClick = { onShareExportedStatement(exported) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text(stringResource(R.string.statement_share))
+                                }
+                                TextButton(
+                                    onClick = onDismissExportBanner,
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text("Dismiss")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // What to Read Aloud Quick Mode Card
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp),
                             )
                             Text(
-                                text = stringResource(R.string.soundbox_tx_count, uiState.todayCount),
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
+                                text = stringResource(R.string.settings_read_mode_label),
+                                style = MaterialTheme.typography.titleMedium,
                             )
                         }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            AnnouncementReadMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = uiState.settings.readMode == mode,
+                                    onClick = { onSelectReadMode(mode) },
+                                    label = { Text(mode.label) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                        .testTag("soundbox_read_mode_${mode.name.lowercase()}"),
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Reads: \"${SpeechFormatter.sampleAnnouncement(uiState.settings)}\"",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                     }
                 }
             }
@@ -289,24 +391,24 @@ fun SoundboxScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             QuickPresetChip(
-                                label = "eSewa • Rs. 500",
-                                tag = "preset_esewa_500",
+                                label = "Fonepay • Rs. 1 (9864843502)",
+                                tag = "preset_fonepay_1_number",
                                 onClick = {
-                                    onSimulatePayment(500.0, "NPR", "Ramesh Adhikari", PaymentChannel.ESEWA)
+                                    onSimulatePayment(1.0, "NPR", "9864843502", PaymentChannel.FONEPAY)
                                 },
                             )
                             QuickPresetChip(
-                                label = "Khalti • Rs. 1,250",
-                                tag = "preset_khalti_1250",
+                                label = "eSewa • Rs. 3,500",
+                                tag = "preset_esewa_3500",
                                 onClick = {
-                                    onSimulatePayment(1250.0, "NPR", "Sita Karki", PaymentChannel.KHALTI)
+                                    onSimulatePayment(3500.0, "NPR", "Ananta Shrest", PaymentChannel.ESEWA)
                                 },
                             )
                             QuickPresetChip(
-                                label = "Fonepay • Rs. 2,400",
-                                tag = "preset_fonepay_2400",
+                                label = "Bank • Rs. 4,000",
+                                tag = "preset_bank_4000",
                                 onClick = {
-                                    onSimulatePayment(2400.0, "NPR", "Hari Prasad", PaymentChannel.FONEPAY)
+                                    onSimulatePayment(4000.0, "NPR", null, PaymentChannel.BANK_ALERT)
                                 },
                             )
                         }
@@ -371,7 +473,7 @@ fun SoundboxScreen(
             } else {
                 items(
                     items = uiState.recentAlerts,
-                    key = { it.id },
+                    key = { it.cloudId.ifBlank { it.id.toString() } },
                 ) { alert ->
                     PaymentAlertRow(
                         alert = alert,

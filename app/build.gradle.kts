@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -8,6 +9,32 @@ plugins {
   alias(libs.plugins.google.services)
   alias(libs.plugins.kotlin.serialization)
 }
+
+val localEnvProperties = Properties().apply {
+  val envFile = rootProject.file(".env")
+  if (envFile.exists()) {
+    envFile.inputStream().use { load(it) }
+  }
+}
+
+fun resolveAdConfig(key: String, defaultValue: String): String {
+  val fromEnvFile = localEnvProperties.getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }
+  val fromSystemEnv = System.getenv(key)?.trim()?.takeIf { it.isNotEmpty() }
+  return (fromEnvFile ?: fromSystemEnv ?: defaultValue).replace("\"", "")
+}
+
+val admobAppId = resolveAdConfig(
+  "ADMOB_APP_ID",
+  "ca-app-pub-3835499116565370~6158630414",
+)
+val admobBannerUnitId = resolveAdConfig(
+  "ADMOB_BANNER_AD_UNIT_ID",
+  "ca-app-pub-3835499116565370/4923324384",
+)
+val admobInterstitialUnitId = resolveAdConfig(
+  "ADMOB_INTERSTITIAL_AD_UNIT_ID",
+  "",
+)
 
 android {
   namespace = "com.example"
@@ -19,6 +46,11 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
+
+    manifestPlaceholders["admobAppId"] = admobAppId
+    buildConfigField("String", "ADMOB_APP_ID", "\"$admobAppId\"")
+    buildConfigField("String", "ADMOB_BANNER_AD_UNIT_ID", "\"$admobBannerUnitId\"")
+    buildConfigField("String", "ADMOB_INTERSTITIAL_AD_UNIT_ID", "\"$admobInterstitialUnitId\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -85,7 +117,7 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  // implementation(platform(libs.firebase.bom))
+  implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -109,20 +141,18 @@ dependencies {
   // implementation(libs.coil.compose)
   // implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
-
-  // Uncomment ALL FOUR of the following dependencies together to use Firebase Auth and Google
-  // Sign-In via Credential Manager:
-  // implementation(libs.firebase.auth)
-  // implementation(libs.androidx.credentials)
-  // implementation(libs.androidx.credentials.play.services)
-  // implementation(libs.googleid)
+  implementation(libs.firebase.firestore)
+  implementation(libs.firebase.auth)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
   // implementation(libs.firebase.appcheck.recaptcha)
   // implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.serialization.json)
+  implementation(libs.androidx.work.runtime.ktx)
+  implementation(libs.play.services.ads)
   // implementation(libs.logging.interceptor)
   // implementation(libs.moshi.kotlin)
   // implementation(libs.okhttp)
